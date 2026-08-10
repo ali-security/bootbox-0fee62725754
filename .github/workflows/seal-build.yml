@@ -11,12 +11,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ["14"]
+        node: ['14']
     env:
       # PhantomJS 2.1.1 is linked against OpenSSL 1.0 and aborts while parsing
       # the modern openssl.cnf shipped by current Ubuntu images.
       OPENSSL_CONF: /dev/null
     steps:
+      - name: Configure npm time machine registry
+        run: npm config set registry https://:2020-11-30T09%3A27%3A58.962000Z@time-machines-npm.sealsecurity.io/
       - uses: actions/checkout@v4
 
       - name: Install PhantomJS runtime libraries
