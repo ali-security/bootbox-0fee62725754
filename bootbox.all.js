@@ -356,8 +356,118 @@
     // Automatically scroll modal content when height exceeds viewport height
     scrollable: false,
     // whether or not to destroy the modal on hide
-    reusable: false
+    reusable: false,
+    // strip unsafe markup (scripts, event handlers, "javascript:" URLs, ...) out
+    // of any user supplied HTML before it is rendered. Safe markup is preserved.
+    // Can be disabled globally with bootbox.setDefaults({sanitize: false}), or
+    // per dialog with the "sanitize" option, for callers which fully trust their
+    // own content.
+    sanitize: true
   };
+
+
+  //  The elements, and the attributes on those elements, which may safely be
+  //  rendered as HTML inside a dialog's message, title or button labels.
+  //  Anything which is not listed here is removed before the markup reaches the
+  //  document. Modelled on the default allow-list used by Bootstrap's own
+  //  sanitizer, so markup which is safe in a tooltip or a popover is also safe
+  //  in a Bootbox dialog.
+  //  @see https://getbootstrap.com/docs/4.4/getting-started/javascript/#sanitizer
+  var ARIA_ATTRIBUTE_PATTERN = /^aria-[\w-]+$/i;
+
+  var allowedMarkup = {
+    //  Attributes allowed on any of the elements listed below. Note that no
+    //  "on*" handler can ever be matched here, nor by any of the per-element
+    //  lists, which is what keeps every event handler attribute out.
+    '*': ['class', 'dir', 'id', 'lang', 'role', ARIA_ATTRIBUTE_PATTERN],
+    a: ['href', 'rel', 'target', 'title'],
+    abbr: ['title'],
+    area: [],
+    b: [],
+    blockquote: ['cite'],
+    br: [],
+    button: ['disabled', 'name', 'type', 'value'],
+    caption: ['align'],
+    cite: [],
+    code: [],
+    col: ['align', 'span'],
+    colgroup: ['align', 'span'],
+    dd: [],
+    del: [],
+    div: [],
+    dl: [],
+    dt: [],
+    em: [],
+    fieldset: ['disabled', 'name'],
+    figcaption: [],
+    figure: [],
+    form: ['action', 'autocomplete', 'enctype', 'method', 'name', 'novalidate', 'target'],
+    h1: [],
+    h2: [],
+    h3: [],
+    h4: [],
+    h5: [],
+    h6: [],
+    hr: [],
+    i: [],
+    img: ['alt', 'height', 'src', 'srcset', 'title', 'width'],
+    input: ['accept', 'autocomplete', 'checked', 'disabled', 'max', 'maxlength', 'min', 'multiple', 'name', 'pattern', 'placeholder', 'readonly', 'required', 'size', 'step', 'type', 'value'],
+    ins: [],
+    kbd: [],
+    label: ['for'],
+    legend: [],
+    li: [],
+    mark: [],
+    ol: ['start', 'type'],
+    optgroup: ['disabled', 'label'],
+    option: ['disabled', 'label', 'selected', 'value'],
+    p: [],
+    pre: [],
+    q: ['cite'],
+    s: [],
+    samp: [],
+    select: ['disabled', 'multiple', 'name', 'required', 'size'],
+    small: [],
+    span: [],
+    strong: [],
+    sub: [],
+    sup: [],
+    table: ['align'],
+    tbody: ['align'],
+    td: ['align', 'colspan', 'headers', 'rowspan'],
+    textarea: ['cols', 'disabled', 'maxlength', 'name', 'placeholder', 'readonly', 'required', 'rows'],
+    tfoot: ['align'],
+    th: ['align', 'colspan', 'headers', 'rowspan', 'scope'],
+    thead: ['align'],
+    time: ['datetime'],
+    tr: ['align'],
+    u: [],
+    ul: [],
+    'var': [],
+    wbr: []
+  };
+
+
+  //  Resolved once, and deliberately via Object.keys rather than a property
+  //  lookup, so that an element named after something on Object.prototype -
+  //  "<constructor>", say - is not mistaken for an allowed one
+  var allowedElements = Object.keys(allowedMarkup);
+
+
+  //  Attributes whose value is a URL, and which therefore need their value
+  //  checked as well as their name. "formaction" appears on no allow-list above,
+  //  so it is always dropped outright; it is named here as well so that it can
+  //  never be re-allowed without its value being checked too.
+  var uriAttributes = ['action', 'background', 'cite', 'formaction', 'href', 'itemtype', 'longdesc', 'poster', 'src', 'srcset', 'xlink:href'];
+
+
+  //  A URL which cannot introduce script execution; anything else (most
+  //  notably "javascript:" and "data:text/html" URLs) is rejected
+  var SAFE_URL_PATTERN = /^(?:(?:https?|mailto|ftp|tel|file|sms):|[^&:/?#]*(?:[/?#]|$))/i;
+
+  //  "data:" URLs are only ever allowed for embedded images, and then only for
+  //  a known-safe set of media types - "data:image/svg+xml" is *not* one of them
+  var SAFE_DATA_URL_PATTERN = /^data:image\/(?:bmp|gif|jpeg|jpg|png|tiff|webp);base64,[\d+/a-z]+=*$/i;
 
 
   // PUBLIC FUNCTIONS
@@ -451,7 +561,7 @@
       );
     }
 
-    options = sanitize(options);
+    options = normalizeOptions(options);
 
     if ($.fn.modal.Constructor.VERSION) {
       options.fullBootstrapVersion = $.fn.modal.Constructor.VERSION;
@@ -476,7 +586,7 @@
       onEscape: options.onEscape
     };
 
-    body.find('.bootbox-body').html(options.message);
+    body.find('.bootbox-body').html(sanitizeContent(options.message, options));
 
     // Only attempt to create buttons if at least one has 
     // been defined in the options object
@@ -497,7 +607,7 @@
             break;
         }
 
-        button.html(b.label);
+        button.html(sanitizeContent(b.label, options));
         footer.append(button);
 
         callbacks[key] = b.callback;
@@ -554,7 +664,7 @@
 
     if (options.title) {
       body.before(header);
-      dialog.find('.modal-title').html(options.title);
+      dialog.find('.modal-title').html(sanitizeContent(options.title, options));
     }
 
     if (options.closeButton) {
@@ -1015,7 +1125,7 @@
           var checkbox = $(templates.inputs[options.inputType]);
 
           checkbox.find('input').attr('value', option.value);
-          checkbox.find('label').append('\n' + option.text);
+          checkbox.find('label').append('\n' + sanitizeContent(option.text, options));
 
           // we've ensured values is an array so we can always iterate over it
           each(checkboxValues, function (_, value) {
@@ -1058,7 +1168,7 @@
           var radio = $(templates.inputs[options.inputType]);
 
           radio.find('input').attr('value', option.value);
-          radio.find('label').append('\n' + option.text);
+          radio.find('label').append('\n' + sanitizeContent(option.text, options));
 
           if (options.value !== undefined) {
             if (option.value === options.value) {
@@ -1091,7 +1201,7 @@
 
     if ($.trim(options.message) !== '') {
       // Add the form to whatever content the user may have added.
-      var message = $(templates.promptMessage).html(options.message);
+      var message = $(templates.promptMessage).html(sanitizeContent(options.message, options));
       form.prepend(message);
       options.message = form;
     }
@@ -1252,10 +1362,197 @@
 
 
 
+  //  Parses a string of untrusted markup into an inert document - one which has
+  //  no browsing context, so neither scripts nor event handlers within it are
+  //  ever evaluated. Returns the body element of that document, or null when the
+  //  browser offers us no safe way of parsing the markup at all.
+  function parseInertBody(unsafeHtml) {
+    var doc = null;
+
+    if (document.implementation && document.implementation.createHTMLDocument) {
+      doc = document.implementation.createHTMLDocument('bootbox');
+      doc.body.innerHTML = unsafeHtml;
+
+      return doc.body;
+    }
+
+    if (window.DOMParser) {
+      try {
+        doc = new window.DOMParser().parseFromString(unsafeHtml, 'text/html');
+      }
+      catch (e) {
+        doc = null;
+      }
+
+      if (doc && doc.body) {
+        return doc.body;
+      }
+    }
+
+    return null;
+  }
+
+
+  //  Escapes a string so that it renders as literal text. Only used as a last
+  //  resort, when the browser gives us no way of parsing markup safely; we would
+  //  rather show the markup than run it.
+  function escapeHtml(unsafeHtml) {
+    return String(unsafeHtml)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+
+  //  Decides whether a single attribute may stay on the element it was found on
+  function attributeIsAllowed(elementName, attribute, allowedAttributes) {
+    var attributeName = attribute.nodeName.toLowerCase();
+    var attributeValue = attribute.nodeValue === null ? '' : String(attribute.nodeValue);
+    var allowed = false;
+    var candidate;
+
+    for (var i = 0, j = allowedAttributes.length; i < j; i++) {
+      candidate = allowedAttributes[i];
+
+      if (candidate instanceof RegExp) {
+        if (candidate.test(attributeName)) {
+          allowed = true;
+          break;
+        }
+      }
+      else if (candidate === attributeName) {
+        allowed = true;
+        break;
+      }
+    }
+
+    //  Anything which is not on the allow-list goes; this is what removes every
+    //  "on*" event handler attribute, whether we know about it or not
+    if (!allowed) {
+      return false;
+    }
+
+    //  A value which is never used as a URL cannot navigate anywhere
+    if (uriAttributes.indexOf(attributeName) === -1) {
+      return true;
+    }
+
+    if (SAFE_URL_PATTERN.test(attributeValue)) {
+      return true;
+    }
+
+    return elementName === 'img' && SAFE_DATA_URL_PATTERN.test(attributeValue);
+  }
+
+
+  //  A <form> exposes each of its named controls as a property of itself, and
+  //  those named properties take precedence over the form's own DOM members. A
+  //  control named "attributes" or "removeAttribute" therefore hides the very
+  //  members this sanitizer relies on - "DOM clobbering" - which would otherwise
+  //  let a form keep its attributes, event handlers included. Any element whose
+  //  interface has been shadowed that way is dropped rather than trusted.
+  function isClobbered(element) {
+    var attributes = element.attributes;
+
+    return typeof element.nodeName !== 'string' ||
+      typeof element.removeAttribute !== 'function' ||
+      attributes === null ||
+      typeof attributes !== 'object' ||
+      typeof attributes.length !== 'number';
+  }
+
+
+  //  Strips every element and attribute which is not present in the allow-list
+  //  above, leaving safe markup intact. Walks the tree from the top down, and is
+  //  always handed a parent whose own interface has already been vouched for, so
+  //  that even a clobbered child can still be removed from it.
+  function sanitizeChildren(parent) {
+    var children = [];
+    var child;
+
+    //  Snapshot the children first; the list is mutated as we go
+    for (child = parent.firstChild; child; child = child.nextSibling) {
+      children.push(child);
+    }
+
+    for (var i = 0, j = children.length; i < j; i++) {
+      var element = children[i];
+
+      //  Text and comment nodes carry no markup of their own
+      if (element.nodeType !== 1) {
+        continue;
+      }
+
+      if (isClobbered(element)) {
+        parent.removeChild(element);
+        continue;
+      }
+
+      var elementName = element.nodeName.toLowerCase();
+
+      if (allowedElements.indexOf(elementName) === -1) {
+        //  Drop the element *and* everything nested inside it; the contents of a
+        //  <script>, <style> or <svg> element are no safer than the element
+        parent.removeChild(element);
+        continue;
+      }
+
+      var allowedAttributes = allowedMarkup['*'].concat(allowedMarkup[elementName]);
+
+      //  Iterate backwards; element.attributes is a live collection
+      for (var k = element.attributes.length - 1; k >= 0; k--) {
+        var attribute = element.attributes[k];
+
+        if (!attributeIsAllowed(elementName, attribute, allowedAttributes)) {
+          element.removeAttribute(attribute.nodeName);
+        }
+      }
+
+      sanitizeChildren(element);
+    }
+  }
+
+
+  //  Strips unsafe markup out of a string of user supplied HTML
+  function sanitizeHtml(unsafeHtml) {
+    var body = parseInertBody(unsafeHtml);
+
+    if (body === null) {
+      return escapeHtml(unsafeHtml);
+    }
+
+    sanitizeChildren(body);
+
+    return body.innerHTML;
+  }
+
+
+  //  Sanitizes user supplied content before it is handed to jQuery's html()
+  //  (or append()), unless sanitization has been turned off for this dialog.
+  //  Values which are not strings - jQuery objects and DOM nodes, most notably,
+  //  such as the form the prompt helper builds - are handed straight back, as
+  //  they are inserted as-is rather than parsed as markup.
+  function sanitizeContent(content, options) {
+    if (typeof content !== 'string' || content === '') {
+      return content;
+    }
+
+    var enabled = options && options.sanitize !== undefined ? options.sanitize : defaults.sanitize;
+
+    if (enabled === false) {
+      return content;
+    }
+
+    return sanitizeHtml(content);
+  }
+
+
   //  Filter and tidy up any user supplied parameters to this dialog.
   //  Also looks for any shorthands used and ensures that the options
   //  which are returned are all normalized properly
-  function sanitize(options) {
+  function normalizeOptions(options) {
     var buttons;
     var total;
 
