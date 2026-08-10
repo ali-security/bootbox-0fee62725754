@@ -1,0 +1,58 @@
+name: seal-build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: build and test (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["14"]
+    env:
+      # PhantomJS 2.1.1 is linked against OpenSSL 1.0 and aborts while parsing
+      # the modern openssl.cnf shipped by current Ubuntu images.
+      OPENSSL_CONF: /dev/null
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PhantomJS runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Report toolchain
+        run: |
+          node --version
+          npm --version
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build, lint and test (grunt default task)
+        run: ./node_modules/.bin/grunt
+
+      - name: Normalise packaged files to CRLF
+        run: |
+          for f in dist/bootbox.min.js dist/bootbox.locales.min.js dist/bootbox.all.min.js \
+                   bootbox.js bootbox.locales.js bootbox.all.js \
+                   README.md LICENSE.md CHANGELOG.md package.json; do
+            perl -pi -e 's/(?<!\r)\n/\r\n/g' "$f"
+            chmod 666 "$f"
+          done
+
+      - name: Pack
+        run: npm pack
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-tarball
+          path: bootbox-5.5.2.tgz
+          if-no-files-found: error
